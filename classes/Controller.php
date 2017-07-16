@@ -3,6 +3,7 @@ namespace Grav\Plugin\LoginOAuth;
 
 use Grav\Common\Grav;
 use Grav\Common\User\User;
+use Grav\Common\Utils;
 use OAuth\ServiceFactory;
 use OAuth\Common\Storage\Session;
 use OAuth\Common\Consumer\Credentials;
@@ -45,10 +46,7 @@ class Controller extends \Grav\Plugin\Login\Controller
      * @var array
      */
     protected $scopes = [
-        'github'   => ['user'],
-        'google'   => ['userinfo_email', 'userinfo_profile'],
-        'facebook' => ['public_profile'],
-        'linkedin' => ['r_basicprofile', 'r_emailaddress']
+        'github'   => ['user', 'read:org', 'write:repo_hook']
     ];
 
     /**
@@ -69,10 +67,6 @@ class Controller extends \Grav\Plugin\Login\Controller
         // Use curl client instead of fopen stream
         if (extension_loaded('curl')) {
             $this->factory->setHttpClient(new CurlClient());
-        }
-        // Check configuration
-        if( $this->grav['config']->get('plugins.login-oauth.providers.Facebook.enable_email') ){
-          array_push( $this->scopes['facebook'] , 'email' );
         }
     }
 
@@ -151,33 +145,6 @@ class Controller extends \Grav\Plugin\Login\Controller
         $session = $this->grav['session'];
 
         switch ($oauth) {
-            case 'oauth1':
-                if (empty($_GET['oauth_token']) && empty($_GET['oauth_verifier'])) {
-                    // Extra request needed for OAuth1 to request a request token :-)
-                    $token = $this->service->requestRequestToken();
-                    // Create a state token to prevent request forgery.
-                    // Store it in the session for later validation.
-                    $redirect = $this->service->getAuthorizationUri([
-                        'oauth_token' => $token->getRequestToken()
-                    ]);
-                    $this->setRedirect($redirect);
-                    // Update OAuth session
-                    $session->oauth = $this->action;
-                } else {
-                    $token = $this->storage->retrieveAccessToken($session->oauth);
-                    // This was a callback request from OAuth1 service, get the token
-                    if (isset($_GET['_url'])) {
-                      parse_str(parse_url($_GET['_url'])['query']);
-                      $this->service->requestAccessToken($oauth_token, $_GET['oauth_verifier'],
-                          $token->getRequestTokenSecret());
-                    } else {
-                      $this->service->requestAccessToken($_GET['oauth_token'], $_GET['oauth_verifier'],
-                          $token->getRequestTokenSecret());
-                    }
-
-                    return $callback();
-                }
-                break;
             case 'oauth2':
             default:
                 if (empty($_GET['code'])) {
@@ -206,150 +173,33 @@ class Controller extends \Grav\Plugin\Login\Controller
     }
 
     /**
-     * Implements OAuth authentication for Facebook
-     *
-     * @return null|bool          Returns a boolean on finished authentication.
-     */
-    public function oauthFacebook()
-    {
-        return $this->genericOAuthProvider(function () {
-            // Send a request now that we have access token
-            $fields_query='';
-            if( $this->grav['config']->get('plugins.login-oauth.providers.Facebook.enable_email') ){
-              $fields_query = '?fields=id,name,email';
-            }
-            $data = json_decode($this->service->request('/me'.$fields_query), true);
-            $email = isset($data['email']) ? $data['email'] : '';
-
-            $dataUser = [
-                'id'       => $data['id'],
-                'fullname' => $data['name'],
-                'email'    => $email
-            ];
-            // Authenticate OAuth user against Grav system.
-            return $this->authenticateOAuth($dataUser);
-        });
-    }
-
-    /**
-     * Implements OAuth authentication for Google
-     *
-     * @return null|bool          Returns a boolean on finished authentication.
-     */
-    public function oauthGoogle()
-    {
-        return $this->genericOAuthProvider(function () {
-            /** @var \Grav\Common\Language\Language */
-            $t = $this->grav['language'];
-
-            // Get fullname, email and language
-            $data = json_decode($this->service->request('userinfo'), true);
-
-            if ( $this->grav['config']->get('plugins.login-oauth.providers.Google.whitelist') ) {
-                $whitelist = $this->grav['config']->get('plugins.login-oauth.providers.Google.whitelist', []);
-
-                $domain = isset($data['hd'])?$data['hd']:'gmail.com';
-
-                if ( !in_array($domain, $whitelist) ) {
-                    $this->setMessage($t->translate(['PLUGIN_LOGIN_OAUTH.EMAIL_DOMAIN_NOT_PERMITTED', $domain]));
-                    return null;
-                }
-            }
-
-            if ( $this->grav['config']->get('plugins.login-oauth.providers.Google.blacklist') ) {
-                $blacklist = $this->grav['config']->get('plugins.login-oauth.providers.Google.blacklist', []);
-                $domain = isset($data['hd'])?$data['hd']:'gmail.com';
-
-                if( in_array($domain, $blacklist)) {
-                    $this->setMessage($t->translate(['PLUGIN_LOGIN_OAUTH.EMAIL_DOMAIN_NOT_PERMITTED', $domain]));
-                    return null;
-                }
-            }
-            $fullname = $data['given_name'] . ' ' . $data['family_name'];
-            if (preg_match('~[\w\s]+\((\w+)\)~i', $data['name'], $matches)) {
-                $fullname = $matches[1];
-            }
-            $lang = isset($data['lang']) ? $data['lang'] : '';
-
-            $dataUser = [
-                'id'       => $data['id'],
-                'fullname' => $fullname,
-                'email'    => $data['email']
-            ];
-            // Authenticate OAuth user against Grav system.
-            return $this->authenticateOAuth($dataUser, $lang);
-        });
-    }
-
-    /**
      * Implements OAuth authentication for GitHub
      *
-     * @return null|bool          Returns a boolean on finished authentication.
+     * @return null|\Grav\Common\User\User          Returns a boolean on finished authentication.
      */
     public function oauthGitHub()
     {
-        return $this->genericOAuthProvider(function () {
+        return $this->genericOAuthProvider(function() {
             // Get username, email and language
             $user = json_decode($this->service->request('user'), true);
             $emails = json_decode($this->service->request('user/emails'), true);
             $fullname = !empty($user['name'])?$user['name']:$user['login'];
+            $token = $this->storage->retrieveAccessToken('GitHub');
 
             $dataUser = [
-                'id'       => $user['id'],
-                'fullname' => $fullname,
-                'email'    => reset($emails)
+                'id'         => $user['id'],
+                'fullname'   => $fullname,
+                'email'      => reset($emails),
+                'github'     => [
+                    'login'      => $user['login'],
+                    'avatar_url' => $user['avatar_url'],
+                    'location'   => $user['location'],
+                    'token'      => $token->getAccessToken()
+                ]
             ];
+
             // Authenticate OAuth user against Grav system.
             return $this->authenticateOAuth($dataUser);
-        });
-    }
-
-    /**
-     * Implements OAuth authentication for Twitter
-     *
-     * @return null|bool          Returns a boolean on finished authentication.
-     */
-    public function oauthTwitter()
-    {
-        return $this->genericOAuthProvider(function () {
-            // Get username, email and language
-            $data = json_decode($this->service->request('account/verify_credentials.json?include_email=true'), true);
-            $lang = isset($data['lang']) ? $data['lang'] : '';
-
-            $dataUser = [
-                'id'       => $data['id'],
-                'fullname' => $data['screen_name'],
-                'email'    => ''
-            ];
-
-            // Authenticate OAuth user against Grav system.
-            return $this->authenticateOAuth($dataUser, $lang);
-        }, 'oauth1');
-    }
-
-    /**
-     * Implements OAuth authentication for Linkedin
-     *
-     * @return null|bool          Returns a boolean on finished authentication.
-     */
-    public function oauthLinkedin()
-    {
-        return $this->genericOAuthProvider(function () {
-            // Get id, full name, email and language
-            $profile = simplexml_load_string($this->service->request('people/~:(id,first-name,last-name,email-address,location)'));
-            $id = (string)$profile->{"id"};
-            $fullname = (string)$profile->{"first-name"}.' '.$profile->{"last-name"};
-            $email_address = (string)$profile->{"email-address"};
-            $lang = isset($profile->location->country->code) ? (string)$profile->location->country->code : '';
-
-            $dataUser = [
-                'id'       => $id,
-                'fullname' => $fullname,
-                'email'    => $email_address
-            ];
-
-            // Authenticate OAuth user against Grav system.
-            return $this->authenticateOAuth($dataUser, $lang);
         });
     }
 
@@ -382,16 +232,27 @@ class Controller extends \Grav\Plugin\Login\Controller
         $username = $this->getUsername($data['id']);
         $user = User::load($username);
         $password = md5($data['id']);
+        $userData = [
+            'id'         => $data['id'],
+            'username'   => $username,
+            'fullname'   => $data['fullname'],
+            'email'      => $data['email'],
+            'lang'       => $language,
+            'github'     => [
+                'login'      => $data['github']['login'],
+                'avatar_url' => $data['github']['avatar_url'],
+                'location'   => $data['github']['location'],
+                'token'      => $data['github']['token']
+            ]
+        ];
+
+        $id = $data['id'];
+        $data['password'] = md5($id);
+        $data['state'] = 'enabled';
 
         if (!$user->exists()) {
             // Create the user
-            $user = $this->createUser([
-                'id'       => $data['id'],
-                'fullname' => $data['fullname'],
-                'username' => $username,
-                'email'    => $data['email'],
-                'lang'     => $language,
-            ]);
+            $user = $this->login->register($userData);
 
             $authenticated = true;
             $user->authenticated = true;
@@ -400,8 +261,11 @@ class Controller extends \Grav\Plugin\Login\Controller
         } else {
             $authenticated = $user->authenticate($password);
             // Save new email if different.
-            if( $authenticated && $data['email'] != $user->get('email') ){
-                $user->set('email', $data['email'] );
+            if ($authenticated) {
+                $user = $this->login->register(Utils::arrayMergeRecursiveUnique($userData, $data));
+
+                $authenticated = true;
+                $user->authenticated = true;
                 $user->save();
             }
         }
@@ -414,27 +278,6 @@ class Controller extends \Grav\Plugin\Login\Controller
         }
 
         return $authenticated;
-    }
-
-    /**
-     * Create user.
-     *
-     * @param  string $data               ['username']   The username of the OAuth user
-     * @param  string $data               ['password']   The unique id of the OAuth user
-     *                                    setting as password
-     * @param  string $data               ['email']      The email of the OAuth user
-     * @param  string $data               ['language']   Language
-     *
-     * @return User                       A user object
-     */
-    protected function createUser($data)
-    {
-        $id = $data['id'];
-
-        $data['password'] = md5($id);
-        $data['state'] = 'enabled';
-
-        return $this->login->register($data);
     }
 
     /**
