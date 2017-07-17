@@ -287,6 +287,8 @@ class Controller extends \Grav\Plugin\Login\Controller
             $this->grav['session']->user = $user;
             unset($this->grav['user']);
             $this->grav['user'] = $user;
+
+            $this->rememberMe->createCookie($username);
         }
 
         return $authenticated;
@@ -342,5 +344,11 @@ class Controller extends \Grav\Plugin\Login\Controller
          * Fallback (not really secure, but better than nothing)
          */
         return hex2bin(substr(str_shuffle(str_repeat('0123456789abcdef', $length * 16)), 0, $length));
+    }
+
+    public function clearRememberMe($username)
+    {
+        $this->rememberMe->clearCookie();
+        $this->rememberMe->getStorage()->cleanAllTriplets($username);
     }
 }

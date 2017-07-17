@@ -5,7 +5,10 @@ use Grav\Common\Plugin;
 use Grav\Common\Session;
 use Grav\Common\Twig\Twig;
 use Grav\Common\Uri;
+use Grav\Common\Utils;
 use Grav\Plugin\LoginOAuth\Controller as Controller;
+use RocketTheme\Toolbox\File\File;
+use RocketTheme\Toolbox\ResourceLocator\UniformResourceLocator;
 
 /**
  * Class LoginOauthPlugin
@@ -20,6 +23,7 @@ class LoginOauthPlugin extends Plugin
     {
         return [
             'onPluginsInitialized' => ['onPluginsInitialized', 0],
+            'onTask.login.logout'  => ['logoutController', 10],
         ];
     }
 
@@ -50,7 +54,7 @@ class LoginOauthPlugin extends Plugin
         $this->enable([
             'onTwigTemplatePaths' => ['onTwigTemplatePaths', 0],
             'onTwigSiteVariables' => ['onTwigSiteVariables', 0],
-            'onLoginPage'         => ['onLoginPage', 0],
+            'onLoginPage'         => ['onLoginPage', 0]
         ]);
 
         // Autoload classes
@@ -105,6 +109,45 @@ class LoginOauthPlugin extends Plugin
         if (!$this->isAdmin() && $this->config->get('plugins.login-oauth.built_in_css')) {
             $this->grav['assets']->add('plugin://login-oauth/css/login-oauth.css');
         }
+    }
+    /**
+     * Initialize login controller
+     */
+    public function logoutController()
+    {
+        $user = $this->grav['user'];
+        $avatar = 'user://media/' . $user->username . '.png';
+        if (file_exists($avatar)) {
+            /** @var UniformResourceLocator $locator */
+            $locator = $this->grav['locator'];
+            $file    = File::instance($locator->findResource($avatar, true, true));
+            $file->delete();
+        }
+
+        /** @var Uri $uri */
+        $uri = $this->grav['uri'];
+        $task = !empty($_POST['task']) ? $_POST['task'] : $uri->param('task');
+        $task = substr($task, strlen('login.'));
+        $post = !empty($_POST) ? $_POST : [];
+
+
+
+        $controller = new Controller($this->grav, $task, $post);
+
+        if (method_exists('Grav\Common\Utils', 'getNonce')) {
+            switch ($task) {
+                case 'logout':
+                    $nonce = $this->grav['uri']->param('logout-nonce');
+                    if (!isset($nonce) || !Utils::verifyNonce($nonce, 'logout-form')) {
+                        return;
+                    }
+                    $controller->clearRememberMe($user->username);
+                    break;
+            }
+        }
+
+        $controller->execute();
+        $controller->redirect();
     }
 
     /**
