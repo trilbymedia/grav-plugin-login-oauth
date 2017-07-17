@@ -8,6 +8,8 @@ use OAuth\ServiceFactory;
 use OAuth\Common\Storage\Session;
 use OAuth\Common\Consumer\Credentials;
 use OAuth\Common\Http\Client\CurlClient;
+use RocketTheme\Toolbox\File\File;
+use RocketTheme\Toolbox\ResourceLocator\UniformResourceLocator;
 
 /**
  * OAuthLoginController
@@ -252,7 +254,8 @@ class Controller extends \Grav\Plugin\Login\Controller
 
         if (!$user->exists()) {
             // Create the user
-            $user = $this->login->register($userData);
+            $userData['member_since'] = time();
+            $user = $this->login->register(Utils::arrayMergeRecursiveUnique($userData, $data));
 
             $authenticated = true;
             $user->authenticated = true;
@@ -262,12 +265,21 @@ class Controller extends \Grav\Plugin\Login\Controller
             $authenticated = $user->authenticate($password);
             // Save new email if different.
             if ($authenticated) {
-                $user = $this->login->register(Utils::arrayMergeRecursiveUnique($userData, $data));
+                $mergeData = Utils::arrayMergeRecursiveUnique($user->toArray(), $userData);
+                $user = $this->login->register(Utils::arrayMergeRecursiveUnique($mergeData, $data));
 
                 $authenticated = true;
                 $user->authenticated = true;
                 $user->save();
             }
+        }
+
+        $avatar = 'user://media/' . $username . '.png';
+        if (!file_exists($avatar)) {
+            /** @var UniformResourceLocator $locator */
+            $locator = $this->grav['locator'];
+            $file = File::instance($locator->findResource($avatar, true, true));
+            $file->save(file_get_contents($userData['github']['avatar_url']));
         }
 
         // Store user in session
