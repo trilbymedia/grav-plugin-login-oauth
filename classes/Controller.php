@@ -266,6 +266,12 @@ class Controller extends \Grav\Plugin\Login\Controller
             // Save new email if different.
             if ($authenticated) {
                 $mergeData = Utils::arrayMergeRecursiveUnique($user->toArray(), $userData);
+
+
+                if (!isset($mergeData['member_since']) && !isset($data['member_since'])) {
+                    $mergeData['member_since'] = time();
+                }
+
                 $user = $this->login->register(Utils::arrayMergeRecursiveUnique($mergeData, $data));
 
                 $authenticated = true;
