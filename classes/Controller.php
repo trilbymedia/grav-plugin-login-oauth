@@ -48,7 +48,7 @@ class Controller extends \Grav\Plugin\Login\Controller
      * @var array
      */
     protected $scopes = [
-        'github'   => ['user', 'read:org', 'write:repo_hook']
+        'github'   => ['user', 'repo', 'write:repo_hook']
     ];
 
     /**
