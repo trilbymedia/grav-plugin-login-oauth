@@ -81,6 +81,7 @@ class Controller extends \Grav\Plugin\Login\Controller
         $t = $this->grav['language'];
         $provider = strtolower($this->action);
         $config = $this->grav['config']->get('plugins.login-oauth.providers.' . $this->action, []);
+        $messages = $this->grav['messages'];
 
         if (isset($config['credentials'])) {
             // Setup the credentials for the requests
@@ -91,7 +92,7 @@ class Controller extends \Grav\Plugin\Login\Controller
             $this->service = $this->factory->createService($this->action, $credentials, $this->storage, $scope);
         }
         if (!$this->service || empty($config)) {
-            $this->login->setMessage($t->translate(['PLUGIN_LOGIN_OAUTH.OAUTH_PROVIDER_NOT_SUPPORTED', $this->action]));
+            $messages->add($t->translate(['PLUGIN_LOGIN_OAUTH.OAUTH_PROVIDER_NOT_SUPPORTED', $this->action]));
 
             return true;
         }
@@ -102,9 +103,9 @@ class Controller extends \Grav\Plugin\Login\Controller
         if (is_bool($authenticated)) {
             $this->reset();
             if ($authenticated) {
-                $this->login->setMessage($t->translate('PLUGIN_LOGIN.LOGIN_SUCCESSFUL'));
+                $messages->add($t->translate('PLUGIN_LOGIN.LOGIN_SUCCESSFUL'));
             } else {
-                $this->login->setMessage($t->translate('PLUGIN_LOGIN.ACCESS_DENIED'));
+                $messages->add($t->translate('PLUGIN_LOGIN.ACCESS_DENIED'));
             }
 
             // Redirect to current URI
@@ -114,7 +115,7 @@ class Controller extends \Grav\Plugin\Login\Controller
             }
             $this->setRedirect($redirect);
         } elseif (!$this->grav['session']->oauth) {
-            $this->login->setMessage($t->translate(['PLUGIN_LOGIN_OAUTH.OAUTH_PROVIDER_NOT_SUPPORTED', $this->action]));
+            $messages->add($t->translate(['PLUGIN_LOGIN_OAUTH.OAUTH_PROVIDER_NOT_SUPPORTED', $this->action]));
         }
 
         return true;
